@@ -1,17 +1,56 @@
 import argparse
 import os
 import cv2
-import yt_dlp
-from app.scanner import scan_local_video
 import datetime
+import yt_dlp
+import subprocess
+import gc
+from faster_whisper import WhisperModel
+from app.matcher import is_candidate
+from app.subtitle_scanner import get_timestamp_from_subtitles
 
-def download_video(url, output_path):
-    print(f"\n[Phase 1] Downloading video locally (capped at 720p for speed)...")
+def fast_extract_remote_frame(url, target_time, output_path):
+    """Extracts a single frame directly from the remote server without downloading the video."""
+    print(f"\n[Fast-Track] Skipping full download! Extracting frame directly at {target_time:.2f}s...")
     ydl_opts = {
-        # Cap at 720p so we don't download a 10GB 4K file, ensuring fast downloads
-        'format': 'best[height<=720]/best',
+        'format': 'bestvideo[ext=mp4]/best', 
+        'quiet': True, 
+        'no_warnings': True
+    }
+    
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            stream_url = info.get('url')
+            
+        if not stream_url:
+            return False
+
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-ss", str(target_time),
+            "-i", stream_url,
+            "-vframes", "1",
+            "-q:v", "2",
+            output_path
+        ]
+        
+        subprocess.run(cmd, check=True)
+        return os.path.exists(output_path)
+    except Exception as e:
+        print(f"Fast-track extraction failed: {e}")
+        return False
+
+def download_lightweight_stream(url, output_path):
+    print("\n[Phase 1] Downloading lightweight stream (~40MB for speed)...")
+    if os.path.exists(output_path):
+        os.remove(output_path)
+        
+    ydl_opts = {
+        'format': 'worstvideo+worstaudio/worst', 
+        'merge_output_format': 'mp4',
         'outtmpl': output_path,
-        'quiet': False, # Shows the progress bar
+        'quiet': False,
         'no_warnings': True
     }
     try:
@@ -22,6 +61,90 @@ def download_video(url, output_path):
         print(f"Download failed: {e}")
         return False
 
+def get_video_duration(video_file):
+    """Gets the duration of the local video file in seconds."""
+    cap = cv2.VideoCapture(video_file)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    cap.release()
+    return frame_count / fps if fps > 0 else 0
+
+def extract_audio_chunk(video_file, start_sec, duration_sec, output_wav="temp_chunk.wav"):
+    """Extracts a lightweight 16kHz mono audio slice using FFmpeg."""
+    if os.path.exists(output_wav):
+        os.remove(output_wav)
+        
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-ss", str(start_sec),
+        "-i", video_file,
+        "-t", str(duration_sec),
+        "-vn",
+        "-acodec", "pcm_s16le",
+        "-ar", "16000",
+        "-ac", "1",
+        output_wav
+    ]
+    subprocess.run(cmd, check=True)
+    return output_wav if os.path.exists(output_wav) else None
+
+def scan_audio_locally(video_file, target_phrase, chunk_duration=180, overlap=10):
+    """Scans audio in small chunks to keep memory usage low and enable early exit."""
+    total_duration = get_video_duration(video_file)
+    print(f"\n[Phase 2] Total duration: {total_duration:.1f}s (~{total_duration/60:.1f} mins)")
+    print(f"[Phase 2] Scanning with 3-minute sliding window (Memory-bounded)...")
+
+    # Load model once with single-threaded execution to prevent resource starvation
+    model = WhisperModel("tiny.en", device="cpu", compute_type="int8", cpu_threads=2)
+    
+    current_start = 0.0
+    matched_time = None
+    step = chunk_duration - overlap
+
+    while current_start < total_duration:
+        window_end = min(current_start + chunk_duration, total_duration)
+        print(f"  -> Processing window: {current_start/60:.1f}m to {window_end/60:.1f}m...")
+        
+        chunk_file = extract_audio_chunk(video_file, current_start, chunk_duration)
+        if not chunk_file:
+            current_start += step
+            continue
+
+        try:
+            segments, _ = model.transcribe(chunk_file, beam_size=1)
+            for segment in segments:
+                if is_candidate(segment.text, target_phrase, threshold=80):
+                    matched_time = current_start + segment.start
+                    print(f"\n🎯 Target phrase found at {matched_time:.2f}s (~{matched_time/60:.2f} mins)!")
+                    break
+        finally:
+            if os.path.exists(chunk_file):
+                os.remove(chunk_file)
+            gc.collect()
+
+        if matched_time is not None:
+            break
+
+        current_start += step
+
+    del model
+    gc.collect()
+    return matched_time
+
+def extract_frame_locally(video_file, target_time, output_path):
+    print(f"\n[Phase 3] Extracting exact visual frame at {target_time:.2f}s locally...")
+    cap = cv2.VideoCapture(video_file)
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    
+    cap.set(cv2.CAP_PROP_POS_FRAMES, int(target_time * fps))
+    ret, frame = cap.read()
+    cap.release()
+    
+    if ret:
+        cv2.imwrite(output_path, frame)
+        return True
+    return False
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True)
@@ -30,38 +153,43 @@ def main():
     args = parser.parse_args()
 
     os.makedirs(args.output, exist_ok=True)
-    local_video_file = "temp_processing_video.mp4"
+    temp_file = "temp_lightweight.mp4"
+    frame_path = os.path.join(args.output, "final_match.jpg")
 
-    # Cleanup any old interrupted files
-    if os.path.exists(local_video_file):
-        os.remove(local_video_file)
+    # Phase 0: Fast-Track Subtitle Check
+    target_time = get_timestamp_from_subtitles(args.url, args.target)
 
-    # 1. Download to disk
-    if not download_video(args.url, local_video_file):
-        print("Fatal Error: Could not download video.")
+    # Remote Frame Sniping (for YouTube / subtitle-enabled streams)
+    if target_time is not None:
+        if fast_extract_remote_frame(args.url, target_time, frame_path):
+            td = datetime.timedelta(seconds=target_time)
+            timestamp_str = str(td)[:-3] if "." in str(td) else str(td) + ".000"
+            print("\n--- FINAL RESULT ---")
+            print(f"Timestamp : {timestamp_str}")
+            print(f"Saved exact frame to: {frame_path}")
+            return
+
+    # Fallback Path for Uncaptioned Videos (e.g., OK.ru)
+    if not download_lightweight_stream(args.url, temp_file):
+        print("Error: Could not retrieve media stream.")
         return
 
-    # 2. Scan locally (100% immune to network crashes)
-    match_data = scan_local_video(local_video_file, args.target)
+    target_time = scan_audio_locally(temp_file, args.target)
 
-    # 3. Output results
-    if match_data:
-        td = datetime.timedelta(seconds=match_data["timestamp"])
-        timestamp_str = str(td)[:-3] if "." in str(td) else str(td) + ".000"
-        
-        print("\n--- FINAL RESULT ---")
-        print(f"Timestamp : {timestamp_str}")
-        
-        frame_path = os.path.join(args.output, "final_sherlock_match.jpg")
-        cv2.imwrite(frame_path, match_data["frame"])
-        print(f"Saved exact frame to: {frame_path}")
+    if target_time is not None:
+        if extract_frame_locally(temp_file, target_time, frame_path):
+            td = datetime.timedelta(seconds=target_time)
+            timestamp_str = str(td)[:-3] if "." in str(td) else str(td) + ".000"
+            print("\n--- FINAL RESULT ---")
+            print(f"Timestamp : {timestamp_str}")
+            print(f"Saved exact frame to: {frame_path}")
+        else:
+            print("\nFailed to extract the video frame.")
     else:
-        print(f"\nTarget phrase '{args.target}' was not spoken in the video.")
+        print(f"\nCould not locate target phrase '{args.target}'.")
 
-    # 4. Cleanup to save hard drive space
-    if os.path.exists(local_video_file):
-        os.remove(local_video_file)
-        print("Temporary video file deleted.")
+    if os.path.exists(temp_file):
+        os.remove(temp_file)
 
 if __name__ == "__main__":
     main()
