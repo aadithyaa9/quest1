@@ -1,8 +1,15 @@
+# Environments
 .venv/
 __pycache__/
+*.pyc
+
+# Outputs & Logs
 output/
 debug_log.txt
-temp_*.mp4
-temp_*.mp3
-temp_*.jpg
-temp_*.wav
+
+# Temp Media Files
+temp_*
+*.mp4
+*.wav
+*.m4a
+*.webm

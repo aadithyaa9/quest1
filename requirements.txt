@@ -1,6 +1,13 @@
+# Runtime dependencies for Dialogue Frame Detector.
+#
+# Requires Python 3.11+.
+# FFmpeg and ffprobe are system dependencies and must be installed separately;
+# they cannot be installed through pip.
+
+# Local frame extraction and audio transcription
+faster-whisper
 opencv-python
-paddleocr
-paddlepaddle
-rapidfuzz
+
+# Video metadata/subtitle retrieval
+requests
 yt-dlp
-numpy
