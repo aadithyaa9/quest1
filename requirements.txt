@@ -1,0 +1,6 @@
+opencv-python
+paddleocr
+paddlepaddle
+rapidfuzz
+yt-dlp
+numpy
