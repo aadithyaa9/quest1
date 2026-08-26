@@ -19,6 +19,7 @@ app/
 ├── main.py               # CLI entry point + Phase 1 (streaming) & Phase 2 (extraction)
 ├── subtitle_scanner.py   # Phase 0 — VTT/JSON3 transcript scan
 └── matcher.py            # Fuzzy phrase matching (substring + sliding window)
+images/
 requirements.txt
 DESIGN.md
 ```
@@ -61,8 +62,8 @@ Timestamp : 0:05:25.000
 Saved exact frame to: output/final_match.jpg
 ```
 
-![OK.ru run — audio streaming fallback](./screenshots/okru-run.png)
-![Extracted frame from OK.ru match](./screenshots/frame-result-1.png)
+![OK.ru run — audio streaming fallback](images/okru-run.png)
+![Extracted frame from OK.ru match](images/frame-result-1.png)
 
 ### Example — YouTube (instant subtitle match)
 
@@ -82,8 +83,8 @@ Timestamp : 0:25:39.909
 Saved exact frame to: output/final_match.jpg
 ```
 
-![YouTube run — instant subtitle match](./screenshots/youtube-run.png)
-![Extracted frame from YouTube match](./screenshots/frame-result-2.png)
+![YouTube run — instant subtitle match](images/youtube-run.png)
+![Extracted frame from YouTube match](images/frame-result-2.png)
 
 ## Tech Stack
 
