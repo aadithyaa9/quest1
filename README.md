@@ -93,3 +93,14 @@ Saved exact frame to: output/final_match.jpg
 - **ffmpeg / ffprobe** — audio decoding, frame extraction
 - **numpy** — raw PCM → Whisper-compatible arrays
 - **difflib (SequenceMatcher)** — fuzzy phrase matching in `matcher.py`
+
+
+## Future Work
+
+- **OCR on Extracted Frames** — run Tesseract/EasyOCR on `final_match.jpg` to auto-verify the match by checking for on-screen captions, subtitles burned into the frame, or overlay text, and flag false positives when no supporting text is found.
+- **Confidence Scoring** — surface the fuzzy-match score (from `matcher.py`) alongside the timestamp so users can gauge match reliability instead of a binary found/not-found result.
+- **Batch Mode** — accept a list of (URL, phrase) pairs from a CSV/JSON file and process them sequentially, useful for building frame datasets across multiple videos.
+- **Scene-Boundary Snapping** — detect nearby scene cuts (via `ffmpeg`'s scene-detection filter) so the extracted frame lands on a clean shot rather than mid-transition.
+- **Web/API Interface** — wrap the CLI in a lightweight FastAPI endpoint so the detector can be triggered remotely instead of only via the interactive terminal prompt.
+- **Caching Layer** — cache resolved stream URLs and transcripts per video ID to avoid re-resolving on repeated queries against the same video.
+- **Additional Host Support** — extend the Phase 2 router beyond YouTube/OK.ru to other `yt-dlp`-supported platforms (Vimeo, Dailymotion, etc.), each with their own CDN-bypass strategy as needed.
