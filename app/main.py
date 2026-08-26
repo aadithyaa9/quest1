@@ -193,7 +193,6 @@
 
 # if __name__ == "__main__":
 #     main()
-
 import argparse
 import os
 import cv2
@@ -290,40 +289,71 @@ def scan_stream_in_memory(url, target_phrase, chunk_duration=180, overlap=10):
     return matched_time
 
 def fast_extract_remote_frame(url, target_time, output_path):
-    print(f"\n[Phase 2] Securely streaming video locally to snipe frame at {target_time:.2f}s...")
-    
+    print(f"\n[Phase 2] Resolving video stream URL to extract frame...")
     if os.path.exists(output_path):
         os.remove(output_path)
 
-    # Bypass SSL and pipe the video bytes to FFmpeg
-    ytdlp_process = subprocess.Popen(
-        ["yt-dlp", "--no-check-certificates", "-f", "bestvideo[ext=mp4]/best", "-q", "-o", "-", url],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-    )
-    
-    ffmpeg_process = subprocess.Popen(
-        [
-            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-            "-ss", str(target_time),
-            "-i", "pipe:0",
-            "-vframes", "1",
-            "-q:v", "2",
-            output_path
-        ],
-        stdin=ytdlp_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-    )
-    
-    ytdlp_process.stdout.close()
-    
-    try:
-        ffmpeg_process.wait(timeout=180) 
-    except subprocess.TimeoutExpired:
-        pass
-    finally:
-        ffmpeg_process.kill()
-        ytdlp_process.kill()
+    # --- OK.RU STRATEGY: Secure Pipe ---
+    if "ok.ru" in url or "odnoklassniki" in url:
+        print("  -> Using secure pipe extraction for OK.ru...")
+        ytdlp_process = subprocess.Popen(
+            ["yt-dlp", "--no-check-certificates", "-f", "bestvideo[ext=mp4]/best", "-q", "-o", "-", url],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+        ffmpeg_process = subprocess.Popen(
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", 
+             "-ss", str(target_time), "-i", "pipe:0", "-vframes", "1", "-q:v", "2", output_path],
+            stdin=ytdlp_process.stdout, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+        ytdlp_process.stdout.close()
+        try:
+            ffmpeg_process.wait(timeout=180) 
+        except subprocess.TimeoutExpired:
+            pass
+        finally:
+            ffmpeg_process.kill()
+            ytdlp_process.kill()
+        return os.path.exists(output_path)
         
-    return os.path.exists(output_path)
+    # --- YOUTUBE/GENERAL STRATEGY: Direct HTTP Seek ---
+    else:
+        print(f"  -> Using direct HTTP seek at {target_time:.2f}s...")
+        ydl_opts = {
+            'format': 'bestvideo[ext=mp4]/best', 
+            'quiet': True, 
+            'no_warnings': True,
+            'nocheckcertificate': True
+        }
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                stream_url = info.get('url')
+                http_headers = info.get('http_headers', {})
+                
+            if not stream_url:
+                return False
+            
+            cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", 
+                   "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]
+                   
+            if http_headers:
+                headers_str = "".join([f"{k}: {v}\r\n" for k, v in http_headers.items()])
+                cmd.extend(["-headers", headers_str])
+
+            cmd.extend([
+                "-ss", str(target_time),
+                "-i", stream_url,
+                "-vframes", "1",
+                "-q:v", "2",
+                output_path
+            ])
+            
+            subprocess.run(cmd, check=True, timeout=60)
+            return os.path.exists(output_path)
+            
+        except Exception as e:
+            print(f"Frame extraction failed: {e}")
+            return False
 
 def main():
     parser = argparse.ArgumentParser()
@@ -354,7 +384,6 @@ def main():
 
 if __name__ == "__main__":
     main()
-
 # import argparse
 # import os
 # import cv2
