@@ -114,7 +114,7 @@ def fast_extract_remote_frame(url, target_time, output_path):
         )
         ytdlp_process.stdout.close()
         try:
-            ffmpeg_process.wait(timeout=180) 
+            ffmpeg_process.wait(timeout=900) 
         except subprocess.TimeoutExpired:
             pass
         finally:
