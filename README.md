@@ -94,6 +94,10 @@ Saved exact frame to: output/final_match.jpg
 - **numpy** — raw PCM → Whisper-compatible arrays
 - **difflib (SequenceMatcher)** — fuzzy phrase matching in `matcher.py`
 
+## Demo
+
+[Watch the demo video](https://drive.google.com/file/d/150DQyQaa6JhBi6F0QqNKFC7cZ9bCY8x2/view?usp=sharing)
+
 
 ## Future Work
 
