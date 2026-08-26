@@ -83,9 +83,9 @@ Timestamp : 0:25:39.909
 Saved exact frame to: output/final_match.jpg
 ```
 
+
 ![YouTube run — instant subtitle match](images/youtube-run.png)
 ![Extracted frame from YouTube match](images/frame-result-2.png)
-
 ## Tech Stack
 
 - **yt-dlp** — metadata, subtitles, stream URL resolution
