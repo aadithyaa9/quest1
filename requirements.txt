@@ -17,3 +17,5 @@ numpy>=1.26.0
 
 # High-performance string matching for dialogue candidate verification
 rapidfuzz>=3.6.1
+
+pytest>=8.0.0
